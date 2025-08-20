@@ -60,7 +60,7 @@ def main():
                         os.path.join(root, f), workflows_dir, actions_root_dir
                     )
     else:
-        print("❌ Please provide --file or --dir")
+        print("Please provide --file or --dir")
 
 
 if __name__ == "__main__":
