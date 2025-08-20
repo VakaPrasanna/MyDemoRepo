@@ -63,5 +63,5 @@ def create_workflow_and_actions(
     with open(workflow_yaml, "w") as f:
         yaml.dump(workflow, f, sort_keys=False)
 
-    print(f"✅ Workflow created: {workflow_yaml}")
-    print(f"✅ Actions created in: {actions_dir}")
+    print(f"Workflow created: {workflow_yaml}")
+    print(f"Actions created in: {actions_dir}")
