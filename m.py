@@ -27,6 +27,7 @@ def main():
 
     process_directory(args.dir)
 
+
 if __name__ == "__main__":
     main()
 
