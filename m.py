@@ -1,30 +1,31 @@
 import os
 import argparse
-from converter import JenkinsToGithubConverter
-from github_actions_manager import GithubActionsManager
+from converter import JenkinsfileConverter
+from github_actions_manager import GitHubActionsManager
 
-def process_jenkinsfile(jenkinsfile_path, output_dir):
-    converter = JenkinsToGithubConverter()
-    stages, workflow_metadata = converter.parse_jenkinsfile(jenkinsfile_path)
+def process_directory(directory):
+    for root, _, files in os.walk(directory):
+        for file in files:
+            if file == "Jenkinsfile":
+                jenkinsfile_path = os.path.join(root, file)
+                rel_dir = os.path.relpath(root, directory)
+                workflow_name = rel_dir.replace(os.sep, "_")
 
-    # Create workflow file
-    manager = GithubActionsManager(output_dir)
-    manager.create_workflow(jenkinsfile_path, stages, workflow_metadata)
+                print(f"Processing {jenkinsfile_path}...")
 
-    # Create composite actions per stage
-    for stage in stages:
-        manager.create_composite_action(stage)
+                converter = JenkinsfileConverter(jenkinsfile_path)
+                workflow_data, actions_data = converter.convert()
+
+                gha_manager = GitHubActionsManager()
+                gha_manager.write_workflow(workflow_name, workflow_data)
+                gha_manager.write_actions(actions_data)
 
 def main():
-    parser = argparse.ArgumentParser(description="Convert Jenkinsfile to GitHub Actions")
-    parser.add_argument("--dir", required=True, help="Directory containing Jenkinsfile")
+    parser = argparse.ArgumentParser(description="Convert Jenkinsfiles to GitHub Actions")
+    parser.add_argument("--dir", required=True, help="Directory containing Jenkinsfiles")
     args = parser.parse_args()
 
-    jenkinsfile_path = os.path.join(args.dir, "Jenkinsfile")
-    output_dir = ".github"
-    os.makedirs(output_dir, exist_ok=True)
-
-    process_jenkinsfile(jenkinsfile_path, output_dir)
+    process_directory(args.dir)
 
 if __name__ == "__main__":
     main()
