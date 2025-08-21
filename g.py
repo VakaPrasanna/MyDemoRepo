@@ -1,58 +1,24 @@
 import os
 import yaml
 
-class GithubActionsManager:
-    def __init__(self, base_dir):
-        self.base_dir = base_dir
+class GitHubActionsManager:
+    def __init__(self, workflows_dir=".github/workflows", actions_dir=".github/actions"):
+        self.workflows_dir = workflows_dir
+        self.actions_dir = actions_dir
+        os.makedirs(self.workflows_dir, exist_ok=True)
+        os.makedirs(self.actions_dir, exist_ok=True)
 
-    def create_workflow(self, jenkinsfile_path, stages, metadata):
-        dir_name = os.path.basename(os.path.dirname(jenkinsfile_path))
-        workflow_dir = os.path.join(self.base_dir, "workflows")
-        os.makedirs(workflow_dir, exist_ok=True)
+    def write_workflow(self, workflow_name, workflow_data):
+        path = os.path.join(self.workflows_dir, f"{workflow_name}.yml")
+        with open(path, "w") as f:
+            yaml.dump(workflow_data, f, sort_keys=False)
+        print(f"✅ Workflow written: {path}")
 
-        workflow = {
-            "name": metadata["name"],
-            "on": metadata["on"],
-            "env": metadata["env"],
-            "inputs": metadata["inputs"],
-            "jobs": {}
-        }
-
-        for stage in stages:
-            job_id = stage["name"].replace(" ", "_").lower()
-            workflow["jobs"][job_id] = {
-                "runs-on": "ubuntu-latest",
-                "steps": [
-                    {
-                        "uses": f"./.github/actions/{stage['name'].replace(' ', '_').lower()}"
-                    }
-                ]
-            }
-
-        if metadata["post"]:
-            workflow["post"] = metadata["post"]
-
-        workflow_file = os.path.join(workflow_dir, f"{dir_name}.yml")
-        with open(workflow_file, "w") as f:
-            yaml.dump(workflow, f, sort_keys=False)
-
-    def create_composite_action(self, stage):
-        action_dir = os.path.join(self.base_dir, "actions", stage["name"].replace(" ", "_").lower())
-        os.makedirs(action_dir, exist_ok=True)
-
-        action = {
-            "name": stage["name"],
-            "description": f"Composite action for {stage['name']}",
-            "runs": {
-                "using": "composite",
-                "steps": []
-            }
-        }
-
-        for step in stage["steps"]:
-            if "run" in step:
-                action["runs"]["steps"].append({"run": step["run"], "shell": "bash"})
-
-        action_file = os.path.join(action_dir, "action.yml")
-        with open(action_file, "w") as f:
-            yaml.dump(action, f, sort_keys=False)
+    def write_actions(self, actions_data):
+        for stage, data in actions_data.items():
+            stage_dir = os.path.join(self.actions_dir, stage)
+            os.makedirs(stage_dir, exist_ok=True)
+            path = os.path.join(stage_dir, "action.yml")
+            with open(path, "w") as f:
+                yaml.dump(data, f, sort_keys=False)
+            print(f"✅ Action written: {path}")
