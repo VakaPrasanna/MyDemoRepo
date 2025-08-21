@@ -1,84 +1,90 @@
 import re
+import yaml
 
-class JenkinsToGithubConverter:
-    def parse_jenkinsfile(self, jenkinsfile_path):
-        with open(jenkinsfile_path, "r") as f:
-            content = f.read()
+class JenkinsfileConverter:
+    def __init__(self, filepath):
+        self.filepath = filepath
+        self.content = self._read_file()
 
-        stages = self.extract_stages(content)
-        workflow_metadata = {
-            "name": self.extract_pipeline_name(content),
-            "on": self.extract_triggers(content),
-            "inputs": self.extract_parameters(content),
-            "env": self.extract_env(content),
-            "post": self.extract_post(content),
+    def _read_file(self):
+        with open(self.filepath, "r") as f:
+            return f.read()
+
+    def convert(self):
+        workflow = {
+            "name": "Converted Workflow",
+            "on": {
+                "push": {"branches": ["main"]},
+                "pull_request": {},
+                "schedule": [{"cron": "0 0 * * 0"}]
+            },
+            "inputs": {},
+            "env": {},
+            "jobs": {},
+            "post": {}
         }
-        return stages, workflow_metadata
 
-    def extract_pipeline_name(self, content):
-        return "Converted Pipeline"
+        actions = {}
 
-    def extract_triggers(self, content):
-        triggers = {"push": {"branches": ["main"]}, "pull_request": {}}
-        cron_match = re.findall(r"cron\(['\"](.+?)['\"]\)", content)
-        if cron_match:
-            triggers["schedule"] = [{"cron": cron_match[0]}]
-        return triggers
+        # Extract parameters
+        param_block = re.findall(r'parameters\s*\{([^}]*)\}', self.content, re.S)
+        if param_block:
+            for line in param_block[0].splitlines():
+                m = re.match(r'(\w+)\s+name:\s*[\'"]?(\w+)[\'"]?', line.strip())
+                if m:
+                    param_type, param_name = m.groups()
+                    workflow["inputs"][param_name] = {
+                        "description": f"Parameter {param_name}",
+                        "required": False
+                    }
 
-    def extract_parameters(self, content):
-        params = {}
-        param_matches = re.findall(r'parameters\s*{([^}]+)}', content, re.S)
-        for block in param_matches:
-            string_params = re.findall(r'string\s+name:\s*[\'"](.+?)[\'"],\s*defaultValue:\s*[\'"](.+?)[\'"]', block)
-            for name, default in string_params:
-                params[name] = {"description": f"Input parameter {name}", "default": default}
-        return params
-
-    def extract_env(self, content):
-        env_vars = {}
-        env_blocks = re.findall(r'environment\s*{([^}]+)}', content, re.S)
-        for block in env_blocks:
-            lines = block.strip().split("\n")
-            for line in lines:
+        # Extract env
+        env_block = re.findall(r'environment\s*\{([^}]*)\}', self.content, re.S)
+        if env_block:
+            for line in env_block[0].splitlines():
                 if "=" in line:
-                    k, v = line.strip().split("=", 1)
-                    env_vars[k.strip()] = v.strip()
-        return env_vars
+                    k, v = map(str.strip, line.split("=", 1))
+                    workflow["env"][k] = v
 
-    def extract_post(self, content):
-        post_actions = {}
-        post_match = re.findall(r'post\s*{([^}]+)}', content, re.S)
-        if post_match:
-            block = post_match[0]
-            always = re.findall(r'always\s*{([^}]+)}', block, re.S)
-            if always:
-                post_actions["always"] = always[0].strip().split("\n")
-        return post_actions
+        # Extract post
+        post_block = re.findall(r'post\s*\{([^}]*)\}', self.content, re.S)
+        if post_block:
+            for line in post_block[0].splitlines():
+                if line.strip():
+                    workflow["post"][line.strip()] = "true"
 
-    def extract_stages(self, content):
-        stages = []
-        stage_matches = re.findall(r'stage\s*\(\s*[\'"](.+?)[\'"]\s*\)\s*{([^}]+)}', content, re.S)
-        for name, block in stage_matches:
-            steps = self.extract_steps(block)
-            stages.append({"name": name, "steps": steps})
-        return stages
+        # Extract stages
+        stage_blocks = re.findall(r'stage\s*\([\'"]([^\'"]+)[\'"]\)\s*\{([^}]*)\}', self.content, re.S)
+        for stage_name, stage_body in stage_blocks:
+            steps = []
+            for line in stage_body.splitlines():
+                line = line.strip()
+                if line.startswith("sh"):
+                    cmd = re.findall(r'["\']([^"\']+)["\']', line)
+                    if cmd:
+                        steps.append({"run": cmd[0], "shell": "bash"})
+                elif line.startswith("echo"):
+                    msg = re.findall(r'["\']([^"\']+)["\']', line)
+                    if msg:
+                        steps.append({"run": f"echo {msg[0]}"})
+                elif "docker" in line:
+                    steps.append({"run": line})
+                elif "kubectl" in line:
+                    steps.append({"run": line})
 
-    def extract_steps(self, block):
-        steps = []
-        sh_cmds = re.findall(r'sh\s+[\'"](.+?)[\'"]', block)
-        for cmd in sh_cmds:
-            steps.append({"run": cmd})
+            actions[stage_name] = {
+                "name": stage_name,
+                "description": f"Composite action for {stage_name}",
+                "runs": {"using": "composite", "steps": steps},
+                "with": {p: f"${{{{ inputs.{p} }}}}" for p in workflow["inputs"]}
+            }
 
-        echo_cmds = re.findall(r'echo\s+[\'"](.+?)[\'"]', block)
-        for cmd in echo_cmds:
-            steps.append({"run": f"echo {cmd}"})
+            workflow["jobs"][stage_name] = {
+                "name": stage_name,
+                "runs-on": "ubuntu-latest",
+                "steps": [
+                    {"uses": f"./.github/actions/{stage_name}", "with": {p: f"${{{{ github.event.inputs.{p} }}}}" for p in workflow["inputs"]}}
+                ]
+            }
 
-        docker_matches = re.findall(r'docker\s*\{([^}]+)}', block, re.S)
-        for docker_block in docker_matches:
-            steps.append({"run": f"# Docker agent block:\n{docker_block.strip()}"})
-
-        kube_matches = re.findall(r'kubernetes\s*\{([^}]+)}', block, re.S)
-        for kube_block in kube_matches:
-            steps.append({"run": f"# Kubernetes agent block:\n{kube_block.strip()}"})
-
-        return steps
+        return workflow, actions
